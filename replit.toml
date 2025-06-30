@@ -1,0 +1,14 @@
+[deployment]
+run = ["node", "index.js"]
+deploymentTarget = "cloudrun"
+
+[nix]
+channel = "stable-22_11"
+
+[env]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+PUPPETEER_EXECUTABLE_PATH = "/nix/store/4x9ygq9bpflz2brfpk5xfqrn7h7fg2x7-chromium-114.0.5735.35/bin/chromium"
+
+[[ports]]
+localPort = 3000
+externalPort = 80

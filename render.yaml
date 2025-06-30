@@ -1,0 +1,22 @@
+version: 1
+build:
+  - name: install-dependencies
+    command: npm ci
+  - name: install-chromium
+    command: npx puppeteer browsers install chrome
+services:
+  - name: puppeteer-scraper
+    type: web
+    runtime: node
+    buildCommand: npm ci && npx puppeteer browsers install chrome
+    startCommand: npm start
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: true
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /opt/render/project/.cache/puppeteer/chrome/linux-*/chrome-linux*/chrome
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/project/.cache/puppeteer
