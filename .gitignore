@@ -44,3 +44,6 @@ build/
 # Temporary files
 *.tmp
 *.temp
+
+# Export Files
+exports/
