@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
+const ScrapedJobsDB = require('../utils/ScrapedJobsDB');
 
 /**
  * REGULAR JOBS SCRAPER - Only fetches non-sponsored jobs
@@ -246,13 +247,34 @@ module.exports = async (req, res) => {
   let browser;
   
   try {
-    console.log('🚀 Starting REGULAR JOBS scraper (skipping sponsored)...');
+    console.log('🚀 Starting OPTIMIZED REGULAR JOBS scraper (skipping sponsored)...');
     
+    // Initialize scraped jobs database
+    const scrapedDB = new ScrapedJobsDB();
+    
+    // Parse query parameters
     const maxJobs = parseInt(req.query.maxJobs) || 999999;
     const quickMode = req.query.quick === 'true';
-    const actualLimit = quickMode ? 20 : maxJobs;
+    const isAutoMode = req.query.auto === 'true';
+    const customLimit = parseInt(req.query.limit) || null;
     
-    console.log(`📊 Mode: ${quickMode ? 'QUICK (20 regular jobs)' : 'FULL (all regular jobs)'}`);
+    // Optimized limits for better performance
+    let actualLimit;
+    if (customLimit) {
+      actualLimit = customLimit;
+    } else if (quickMode) {
+      actualLimit = isAutoMode ? 10 : 15; // Even smaller for auto mode
+    } else {
+      actualLimit = maxJobs;
+    }
+    
+    console.log(`📊 Mode: ${quickMode ? `QUICK (${actualLimit} regular jobs)` : 'FULL (all regular jobs)'}`);
+    console.log(`🤖 Auto mode: ${isAutoMode ? 'YES' : 'NO'}`);
+    
+    // Clean old jobs from database periodically
+    if (Math.random() < 0.1) { // 10% chance
+      scrapedDB.cleanOldJobs();
+    }
     
     browser = await puppeteer.launch({
       headless: process.env.PUPPETEER_HEADLESS !== 'false' ? 'new' : false,
@@ -269,14 +291,15 @@ module.exports = async (req, res) => {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
-    // Step 1: Get all regular (non-sponsored) job URLs with correct pagination
+    // Step 1: Get regular job URLs with optimized pagination
     console.log('🔍 Discovering regular job URLs (skipping sponsored)...');
     
     const allJobUrls = [];
     let currentPage = 1;
-    const maxPages = quickMode ? 3 : 15; // Search more pages to find regular jobs
+    const maxPages = quickMode ? 2 : 15; // Reduced pages for speed
     let totalSponsored = 0;
     let totalRegular = 0;
+    let skippedAlreadyScraped = 0;
     
     while (currentPage <= maxPages) {
       try {
@@ -374,23 +397,57 @@ module.exports = async (req, res) => {
       throw new Error('No regular job URLs found');
     }
     
-    // Step 2: Extract job details from regular jobs only
-    const jobsToProcess = Math.min(actualLimit, allJobUrls.length);
+    // Step 2: Filter out already scraped jobs and extract details
+    console.log(`\n🔍 Filtering out already scraped jobs...`);
+    
+    const newJobUrls = [];
+    const alreadyScrapedUrls = [];
+    
+    // Quick pre-filtering based on posting ID in URL
+    allJobUrls.forEach(url => {
+      const postingIdMatch = url.match(/cls\/(\d+)\.html/);
+      if (postingIdMatch) {
+        const postingId = postingIdMatch[1];
+        if (scrapedDB.hasJob(postingId)) {
+          alreadyScrapedUrls.push(url);
+          skippedAlreadyScraped++;
+        } else {
+          newJobUrls.push(url);
+        }
+      } else {
+        newJobUrls.push(url); // Include if we can't extract posting ID
+      }
+    });
+    
+    console.log(`📊 Jobs analysis:`);
+    console.log(`   🆕 New jobs to scrape: ${newJobUrls.length}`);
+    console.log(`   ⏭️ Already scraped (skipped): ${skippedAlreadyScraped}`);
+    
+    const jobsToProcess = Math.min(actualLimit, newJobUrls.length);
     const scrapedJobs = [];
     const failedUrls = [];
     
-    console.log(`\\n🚀 Starting to scrape ${jobsToProcess} regular jobs...`);
+    console.log(`\n🚀 Starting to scrape ${jobsToProcess} NEW regular jobs...`);
     
     for (let i = 0; i < jobsToProcess; i++) {
-      const jobUrl = allJobUrls[i];
+      const jobUrl = newJobUrls[i];
       const progress = Math.round(((i + 1) / jobsToProcess) * 100);
       
-      console.log(`\\n🔍 [${progress}%] Processing regular job ${i + 1}/${jobsToProcess}`);
+      console.log(`\n🔍 [${progress}%] Processing NEW job ${i + 1}/${jobsToProcess}`);
       console.log(`📄 ${jobUrl}`);
       
       const jobDetails = await extractJobFromUrl(page, jobUrl);
       
       if (jobDetails) {
+        // Add to database to prevent future re-scraping
+        if (jobDetails.posting_id) {
+          scrapedDB.addJob(jobDetails.posting_id, {
+            title: jobDetails.title,
+            url: jobUrl,
+            scraped_date: new Date().toISOString()
+          });
+        }
+        
         scrapedJobs.push(jobDetails);
         console.log(`✅ Extracted: ${jobDetails.title} | Salary: ${jobDetails.salary || 'N/A'} | Contact: ${jobDetails.contact || 'N/A'}`);
       } else {
@@ -398,25 +455,31 @@ module.exports = async (req, res) => {
         console.log(`❌ Failed to extract job details`);
       }
       
-      // Rate limiting
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Faster rate limiting for auto mode
+      const delay = isAutoMode ? 1500 : 2000;
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
     
-    console.log(`\\n🎉 REGULAR JOBS SCRAPING COMPLETE! Extracted ${scrapedJobs.length} regular jobs`);
+    console.log(`\n🎉 OPTIMIZED SCRAPING COMPLETE! Extracted ${scrapedJobs.length} NEW regular jobs`);
     
-    // Step 3: Save to CSV
+    // Step 3: Save to CSV (only if we have new jobs)
     let csvResult = null;
     if (scrapedJobs.length > 0) {
-      const filename = `regular_jobs_${quickMode ? 'quick_' : ''}${new Date().toISOString().slice(0, 10)}.csv`;
+      const filename = `regular_jobs_${quickMode ? 'quick_' : ''}${isAutoMode ? 'auto_' : ''}${new Date().toISOString().slice(0, 10)}.csv`;
       csvResult = saveJobsToCSV(scrapedJobs, filename);
       console.log(`📊 CSV saved: ${filename}`);
     }
     
+    // Get database stats
+    const dbStats = scrapedDB.getStats();
+    
     // Calculate stats
-    const successRate = Math.round((scrapedJobs.length / jobsToProcess) * 100);
+    const successRate = jobsToProcess > 0 ? Math.round((scrapedJobs.length / jobsToProcess) * 100) : 0;
     
     const summary = {
       total_jobs: scrapedJobs.length,
+      new_jobs: scrapedJobs.length,
+      skipped_jobs: skippedAlreadyScraped,
       regular_jobs_only: true,
       sponsored_jobs_skipped: totalSponsored,
       with_salary: scrapedJobs.filter(job => job.salary).length,
@@ -430,19 +493,27 @@ module.exports = async (req, res) => {
     
     res.json({
       success: true,
-      message: `Successfully scraped ${scrapedJobs.length} REGULAR jobs (${totalSponsored} sponsored jobs skipped)`,
+      message: `Successfully scraped ${scrapedJobs.length} NEW regular jobs (${skippedAlreadyScraped} already scraped, ${totalSponsored} sponsored skipped)`,
       stats: {
         totalRegularUrlsFound: allJobUrls.length,
+        newJobsFound: newJobUrls.length,
+        alreadyScrapedSkipped: skippedAlreadyScraped,
         sponsoredJobsSkipped: totalSponsored,
         regularJobsProcessed: jobsToProcess,
         regularJobsExtracted: scrapedJobs.length,
         failedExtractions: failedUrls.length,
-        successRate: successRate
+        successRate: successRate,
+        database_stats: dbStats
       },
       summary: summary,
       csvExport: csvResult,
       data: scrapedJobs,
-      note: quickMode ? 'Quick mode: Limited to 20 regular jobs for testing' : 'Full scrape of regular jobs completed',
+      note: quickMode ? `Optimized quick mode: Limited to ${actualLimit} NEW regular jobs` : 'Full scrape of regular jobs completed',
+      optimization: {
+        duplicate_detection: 'Enabled - skips already scraped jobs using posting ID',
+        auto_mode: isAutoMode,
+        reduced_delays: isAutoMode ? 'Enabled for faster processing' : 'Disabled'
+      },
       scraped_at: new Date().toISOString()
     });
     

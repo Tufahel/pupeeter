@@ -9,9 +9,13 @@ const jobsAllHandler = require('./api/jobs-all-simple');
 const jobsStepHandler = require('./api/jobs-step');
 const jobsRegularHandler = require('./api/jobs-regular');
 const jobsAnalysisHandler = require('./api/jobs-analysis');
+const AutoScrapingScheduler = require('./utils/AutoScrapingScheduler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Initialize auto-scraping scheduler
+const autoScraper = new AutoScrapingScheduler(PORT);
 
 // Middleware
 app.use(cors());
@@ -79,15 +83,30 @@ app.get('/', (req, res) => {
         speed: 'Fast (~10 seconds)',
         params: '?pages=5 (default: 3), ?detailed=true',
         note: 'Provides detailed statistics on job classification and pattern analysis'
+      },
+      'auto-scraping (NEW!)': {
+        url: '/api/auto-scraping/*',
+        description: 'Automatic scraping every 5 minutes with smart duplicate detection',
+        commands: {
+          'start': '/api/auto-scraping/start - Start automatic scraping',
+          'stop': '/api/auto-scraping/stop - Stop automatic scraping',
+          'status': '/api/auto-scraping/status - Check scraping status'
+        },
+        note: 'Runs jobs-regular?quick=true&auto=true every 5 minutes automatically'
       }
     },
     status: 'running',
+    auto_scraping: {
+      enabled: autoScraper.getStatus().is_running,
+      status: autoScraper.getStatus()
+    },
     recommendations: {
       'For few jobs': 'Use /api/jobs-advanced?limit=10 for detailed extraction',
       'For ALL jobs': 'Use /api/jobs-all?quick=true (test) or /api/jobs-all (full)',
       'For large jobs': 'Use /api/jobs-step for controlled batch scraping',
       'For regular jobs only': 'Use /api/jobs-regular to skip sponsored listings',
-      'For analysis': 'Use /api/jobs-analysis to understand job distribution patterns'
+      'For analysis': 'Use /api/jobs-analysis to understand job distribution patterns',
+      'For automation': 'Use /api/auto-scraping/start for continuous background scraping'
     }
   });
 });
@@ -101,6 +120,48 @@ app.get('/api/jobs-all', jobsAllHandler);
 app.get('/api/jobs-step', jobsStepHandler);
 app.get('/api/jobs-regular', jobsRegularHandler);
 app.get('/api/jobs-analysis', jobsAnalysisHandler);
+
+// Auto-scraping control endpoints
+app.get('/api/auto-scraping/start', (req, res) => {
+  try {
+    autoScraper.start();
+    res.json({
+      success: true,
+      message: 'Auto-scraping started successfully',
+      status: autoScraper.getStatus(),
+      note: 'Will scrape new jobs every 5 minutes using /api/jobs-regular?quick=true&auto=true'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/auto-scraping/stop', (req, res) => {
+  try {
+    autoScraper.stop();
+    res.json({
+      success: true,
+      message: 'Auto-scraping stopped successfully',
+      status: autoScraper.getStatus()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/auto-scraping/status', (req, res) => {
+  res.json({
+    success: true,
+    status: autoScraper.getStatus(),
+    uptime: process.uptime()
+  });
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
