@@ -84,15 +84,15 @@ app.get('/', (req, res) => {
         params: '?pages=5 (default: 3), ?detailed=true',
         note: 'Provides detailed statistics on job classification and pattern analysis'
       },
-      'auto-scraping (NEW!)': {
+      'auto-scraping (INTERACTIVE!)': {
         url: '/api/auto-scraping/*',
-        description: 'Automatic scraping every 5 minutes with smart duplicate detection',
+        description: 'Interactive auto-scraping - prompts on startup whether to enable',
         commands: {
-          'start': '/api/auto-scraping/start - Start automatic scraping',
+          'start': '/api/auto-scraping/start - Start automatic scraping (if not enabled at startup)',
           'stop': '/api/auto-scraping/stop - Stop automatic scraping',
           'status': '/api/auto-scraping/status - Check scraping status'
         },
-        note: 'Runs jobs-regular?quick=true&auto=true every 5 minutes automatically'
+        note: 'Server prompts for auto-start preference! Enhanced: 20 jobs/run, 3 pages, smart CSV management'
       }
     },
     status: 'running',
@@ -106,7 +106,7 @@ app.get('/', (req, res) => {
       'For large jobs': 'Use /api/jobs-step for controlled batch scraping',
       'For regular jobs only': 'Use /api/jobs-regular to skip sponsored listings',
       'For analysis': 'Use /api/jobs-analysis to understand job distribution patterns',
-      'For automation': 'Use /api/auto-scraping/start for continuous background scraping'
+      'For automation': 'Server will prompt if you want auto-scraping enabled on startup'
     }
   });
 });
@@ -168,11 +168,70 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 API available at http://localhost:${PORT}`);
   console.log(`🔍 Jobs endpoint: http://localhost:${PORT}/api/jobs`);
   console.log(`🔍 Detailed Jobs endpoint: http://localhost:${PORT}/api/jobs-detailed`);
+  
+  // Check if running in interactive mode
+  const isInteractive = process.stdin.isTTY && process.env.NODE_ENV !== 'production';
+  
+  if (isInteractive) {
+    // Interactive prompt for auto-scraping
+    const readline = require('readline');
+    
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    
+    console.log(`\n🤖 Auto-Scraping Configuration:`);
+    console.log(`   📊 Enhanced mode: 20 jobs per run, 3 pages, smart duplicate detection`);
+    console.log(`   ⏰ Frequency: Every 5 minutes automatically`);
+    
+    rl.question('\n❓ Do you want to start auto-scraping now? (y/n): ', (answer) => {
+      const startAutoScraping = answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes';
+      
+      if (startAutoScraping) {
+        console.log(`\n✅ Starting auto-scraping scheduler...`);
+        try {
+          autoScraper.start();
+          console.log(`🎉 Auto-scraping enabled! Will run every 5 minutes automatically`);
+          console.log(`📊 Enhanced mode: 20 jobs per run, smart duplicate detection`);
+          console.log(`🛑 To stop: curl "http://localhost:${PORT}/api/auto-scraping/stop"`);
+          console.log(`📈 To check status: curl "http://localhost:${PORT}/api/auto-scraping/status"`);
+        } catch (error) {
+          console.log(`❌ Failed to start auto-scraping: ${error.message}`);
+        }
+      } else {
+        console.log(`\n⏸️ Auto-scraping disabled by user choice`);
+        console.log(`🚀 To start manually later: curl "http://localhost:${PORT}/api/auto-scraping/start"`);
+        console.log(`🌐 Or visit: http://localhost:${PORT}/api/auto-scraping/start`);
+      }
+      
+      console.log(`\n🎯 Server ready! Press Ctrl+C to stop`);
+      rl.close();
+    });
+  } else {
+    // Non-interactive mode (production, etc.)
+    const autoStartEnabled = process.env.AUTO_START !== 'false';
+    
+    if (autoStartEnabled) {
+      console.log(`\n🤖 Non-interactive mode: Starting auto-scraping automatically...`);
+      try {
+        autoScraper.start();
+        console.log(`✅ Auto-scraping enabled! Will run every 5 minutes automatically`);
+        console.log(`📊 Enhanced mode: 20 jobs per run, smart duplicate detection`);
+        console.log(`🛑 To stop: curl "http://localhost:${PORT}/api/auto-scraping/stop"`);
+      } catch (error) {
+        console.log(`❌ Failed to start auto-scraping: ${error.message}`);
+      }
+    } else {
+      console.log(`\n⏸️ Auto-scraping disabled (AUTO_START=false)`);
+      console.log(`🚀 To start manually: curl "http://localhost:${PORT}/api/auto-scraping/start"`);
+    }
+  }
 });
 
 module.exports = app;

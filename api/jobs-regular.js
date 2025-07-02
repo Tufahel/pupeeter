@@ -2,6 +2,7 @@ const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
 const ScrapedJobsDB = require('../utils/ScrapedJobsDB');
+const CSVComparator = require('../utils/CSVComparator');
 
 /**
  * REGULAR JOBS SCRAPER - Only fetches non-sponsored jobs
@@ -175,6 +176,21 @@ async function extractJobFromUrl(page, jobUrl) {
         }
       }
       
+      // Posting ID - Extract from page content or URL
+      const postingIdMatches = [
+        bodyText.match(/Posting ID:\s*(\d+)/i),
+        bodyText.match(/Post ID:\s*(\d+)/i),
+        bodyText.match(/ID:\s*(\d+)/i),
+        window.location.href.match(/cls\/(\d+)\.html/) // Fallback to URL
+      ];
+      
+      for (const match of postingIdMatches) {
+        if (match && match[1]) {
+          jobData.posting_id = match[1].trim();
+          break;
+        }
+      }
+      
       // Posted date
       const dateMatches = [
         bodyText.match(/Posted:\s*([^\n\r]+)/i),
@@ -232,6 +248,15 @@ async function extractJobFromUrl(page, jobUrl) {
     if (jobDetails) {
       jobDetails.url = jobUrl;
       jobDetails.scraped_at = new Date().toISOString();
+      
+      // Ensure posting ID is set (fallback to URL extraction)
+      if (!jobDetails.posting_id) {
+        const urlMatch = jobUrl.match(/cls\/(\d+)\.html/);
+        if (urlMatch && urlMatch[1]) {
+          jobDetails.posting_id = urlMatch[1];
+        }
+      }
+      
       return jobDetails;
     }
     
@@ -258,12 +283,12 @@ module.exports = async (req, res) => {
     const isAutoMode = req.query.auto === 'true';
     const customLimit = parseInt(req.query.limit) || null;
     
-    // Optimized limits for better performance
+    // Optimized limits for better performance - INCREASED for more comprehensive collection
     let actualLimit;
     if (customLimit) {
       actualLimit = customLimit;
     } else if (quickMode) {
-      actualLimit = isAutoMode ? 10 : 15; // Even smaller for auto mode
+      actualLimit = isAutoMode ? 20 : 15; // Increased auto mode to 20 jobs for better coverage
     } else {
       actualLimit = maxJobs;
     }
@@ -296,7 +321,7 @@ module.exports = async (req, res) => {
     
     const allJobUrls = [];
     let currentPage = 1;
-    const maxPages = quickMode ? 2 : 15; // Reduced pages for speed
+    const maxPages = quickMode ? (isAutoMode ? 3 : 2) : 15; // Increased auto mode to 3 pages for better coverage
     let totalSponsored = 0;
     let totalRegular = 0;
     let skippedAlreadyScraped = 0;
@@ -462,12 +487,28 @@ module.exports = async (req, res) => {
     
     console.log(`\n🎉 OPTIMIZED SCRAPING COMPLETE! Extracted ${scrapedJobs.length} NEW regular jobs`);
     
-    // Step 3: Save to CSV (only if we have new jobs)
+    // Step 3: Enhanced CSV export with duplicate checking
     let csvResult = null;
     if (scrapedJobs.length > 0) {
       const filename = `regular_jobs_${quickMode ? 'quick_' : ''}${isAutoMode ? 'auto_' : ''}${new Date().toISOString().slice(0, 10)}.csv`;
-      csvResult = saveJobsToCSV(scrapedJobs, filename);
-      console.log(`📊 CSV saved: ${filename}`);
+      
+      // Use CSV comparator to avoid duplicates in CSV files
+      const csvComparator = new CSVComparator();
+      const newJobsForCSV = csvComparator.filterNewJobs(scrapedJobs, filename);
+      
+      if (newJobsForCSV.length > 0) {
+        // Append only new jobs to CSV
+        csvResult = csvComparator.appendToCSV(newJobsForCSV, filename);
+        console.log(`📊 CSV updated: ${filename} (+${newJobsForCSV.length} new jobs)`);
+      } else {
+        console.log(`📊 CSV unchanged: ${filename} (no new jobs to add)`);
+        csvResult = {
+          success: true,
+          filename,
+          newRecords: 0,
+          message: 'No new jobs to add to CSV'
+        };
+      }
     }
     
     // Get database stats
