@@ -9,6 +9,7 @@ const jobsAllHandler = require('./api/jobs-all-simple');
 const jobsStepHandler = require('./api/jobs-step');
 const jobsRegularHandler = require('./api/jobs-regular');
 const jobsAnalysisHandler = require('./api/jobs-analysis');
+const { getJobsFromCSV, getAvailableCSVFiles, getCSVStats } = require('./api/jobs-csv-data');
 const AutoScrapingScheduler = require('./utils/AutoScrapingScheduler');
 
 const app = express();
@@ -93,6 +94,26 @@ app.get('/', (req, res) => {
           'status': '/api/auto-scraping/status - Check scraping status'
         },
         note: 'Server prompts for auto-start preference! Enhanced: 20 jobs/run, 3 pages, smart CSV management'
+      },
+      'latest-jobs (NEW!)': {
+        url: '/api/latest-jobs',
+        description: 'Get scraped job data from CSV files as JSON',
+        speed: 'Fast (~1-2 seconds)',
+        params: '?date=YYYY-MM-DD (specific date), ?limit=N, ?search=keyword, ?location=city, ?salary_min=amount',
+        note: 'Read and filter CSV data with powerful search capabilities'
+      },
+      'csv-files (NEW!)': {
+        url: '/api/csv-files',
+        description: 'List all available CSV files with metadata',
+        speed: 'Instant',
+        note: 'Get file sizes, dates, and modification times'
+      },
+      'csv-stats (NEW!)': {
+        url: '/api/csv-stats',
+        description: 'Detailed statistics and analysis of CSV data',
+        speed: 'Fast (~2-3 seconds)',
+        params: '?date=YYYY-MM-DD (specific date)',
+        note: 'Salary analysis, location distribution, contact method stats'
       }
     },
     status: 'running',
@@ -106,7 +127,9 @@ app.get('/', (req, res) => {
       'For large jobs': 'Use /api/jobs-step for controlled batch scraping',
       'For regular jobs only': 'Use /api/jobs-regular to skip sponsored listings',
       'For analysis': 'Use /api/jobs-analysis to understand job distribution patterns',
-      'For automation': 'Server will prompt if you want auto-scraping enabled on startup'
+      'For automation': 'Server will prompt if you want auto-scraping enabled on startup',
+      'For CSV data': 'Use /api/latest-jobs with filters to search scraped jobs as JSON',
+      'For data analysis': 'Use /api/csv-stats for salary, location, and contact statistics'
     }
   });
 });
@@ -120,6 +143,11 @@ app.get('/api/jobs-all', jobsAllHandler);
 app.get('/api/jobs-step', jobsStepHandler);
 app.get('/api/jobs-regular', jobsRegularHandler);
 app.get('/api/jobs-analysis', jobsAnalysisHandler);
+
+// CSV Data endpoints
+app.get('/api/latest-jobs', getJobsFromCSV);
+app.get('/api/csv-files', getAvailableCSVFiles);
+app.get('/api/csv-stats', getCSVStats);
 
 // Auto-scraping control endpoints
 app.get('/api/auto-scraping/start', (req, res) => {

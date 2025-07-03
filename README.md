@@ -152,6 +152,25 @@ curl "http://localhost:3000/api/jobs-regular?quick=true&limit=5"
 }
 ```
 
+### Latest Jobs API (NEW!)
+
+```bash
+# Get latest scraped jobs (limited)
+curl "http://localhost:3000/api/latest-jobs?limit=10"
+
+# Search for engineers in Riyadh
+curl "http://localhost:3000/api/latest-jobs?search=engineer&location=riyadh"
+
+# Jobs with salary >= 2000 SAR
+curl "http://localhost:3000/api/latest-jobs?salary_min=2000"
+
+# Get CSV statistics
+curl "http://localhost:3000/api/csv-stats"
+
+# List available CSV files
+curl "http://localhost:3000/api/csv-files"
+```
+
 ## 🎯 Smart Features
 
 ### 🔄 **Auto-Scraping Workflow**
